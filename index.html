@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>ГИС Казахстана</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <script src='https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js'></script>
+    <link href='https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css' rel='stylesheet' />
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <div class="levels-panel" id="levels-control"></div>
+    
+    <div class="sidebar">
+        <div class="accordion-container" id="accordion-list"></div>
+    </div>
+
+    <div class="legend-panel" id="legend-container"></div>
+
+    <div id="chart-wrapper">
+        
+        <div class="chart-controls">
+            <button class="chart-btn" id="collapse-btn" onclick="toggleChartCollapse()">Свернуть</button>
+            <button class="chart-btn" onclick="toggleChartFullscreen()">⛶</button>
+        </div>
+
+        <div id="chart-title">Выберите регион</div>
+
+        <div style="flex-grow: 1; position: relative; min-height: 0;">
+            <canvas id="popChart"></canvas>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/map.js"></script>
+</body>
+</html>
