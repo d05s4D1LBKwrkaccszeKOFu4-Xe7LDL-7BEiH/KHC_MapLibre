@@ -264,3 +264,49 @@ body { margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; overflow: hid
 #chart-wrapper.collapsed #chart-title {
     display: none; /* Скрываем график при сворачивании */
 }
+
+/* Контейнер для навигации с логотипами */
+.nav-container {
+    position: absolute;
+    top: 8px; /* Должно совпадать с top у #chart-wrapper */
+    right: 415px; /* Ширина #chart-wrapper (380px) + отступ (15px) */
+    z-index: 1001;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+}
+
+.nav-logo-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s;
+}
+
+.nav-logo-link:hover {
+    transform: scale(1.1);
+}
+
+.nav-logo-img {
+    width: auto;
+    border-radius: 0px;
+    background: white;
+    padding: 2px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    display: block;
+}
+
+/* Индивидуальные размеры для ваших логотипов */
+.logo-khc {
+    height: 26px;
+}
+
+.logo-q88 {
+    height: 18px;
+}
+
+/* Адаптация: если график свернут, логотипы остаются на месте */
+#chart-wrapper.collapsed ~ .nav-container {
+    right: 165px; /* Подстройка под свернутую ширину (150px + отступ) */
+}
