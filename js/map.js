@@ -735,7 +735,7 @@ else if (layerId === 'balance') {
             title = p['name'];
             content = `<div class="popup-row"><span>Население:</span> <b>${p['popul']}</b></div>`;
             if (currentLevel === 'settlement' && title && title.toUpperCase().includes('КОСТАНАЙ')) {
-                footer = `<div style="margin-top:10px; text-align:center;"><a href="https://d05s4D1LBKwrkaccszeKOFu4-Xe7LDL-7BEiH.github.io/kostY5_JYrviDpanay/"" class="popup-btn-link">Перейти к карте Костаная</a></div>`;
+                footer = `<div style="margin-top:10px; text-align:center;"><a href="https://d05s4d1lbkwrkaccszekofu4-xe7ldl-7beih.github.io/k05_Qf5t4nayk99_t1L35FBhAyupbf/"" class="popup-btn-link">Перейти к карте Костаная</a></div>`;
             }
         }
         else if (layerId === 'storages') {
