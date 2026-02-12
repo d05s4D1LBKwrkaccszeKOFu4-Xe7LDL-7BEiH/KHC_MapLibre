@@ -79,6 +79,21 @@ const MAP_CONFIG = {
                     stops: [0, 3020000, 3240000, 3560000, 3839000, 4242000], // Примерные диапазоны
                     colors: ['#fff7bc', '#fee391', '#fec44f', '#fe9929', '#ec7014', '#cc4c02'] // Оранжевая гамма
                 },
+                {
+                id: 'raw_materials_toggle',
+                label: 'Перспективные регионы',
+                type: 'toggle-dropdown', // Новый комбинированный тип
+                targetLayer: 'balance',
+                field: 'Материал/оборудование', // Поле для фильтра
+                popupField: 'combined_info'     // Поле для содержимого Popup
+                },
+                {
+                id: 'manufacturers_filter',
+                label: 'Реестр производителей', // Текст возле галочки
+                type: 'toggle-dropdown',         // <-- ВАЖНО: меняем тип
+                targetLayer: 'towns',            // ID слоя городов
+                field: 'classifications'         // Поле с массивом типов продукции
+                },
                 // ----------------------------------------------
                 {
                     id: 'food_balance', label: 'Продовольственный баланс', type: 'analysis', targetLayer: 'districts',
@@ -97,7 +112,7 @@ const MAP_CONFIG = {
                 { id: 'susn', label: 'Соц. уязвимые слои населения', type: 'choropleth', targetLayer: 'districts', legendTitle: "СУСН (человек)", field: 'СУСН (человек)', stops: [0, 650, 2000, 4000, 7000], colors: ['#edf8e9', '#bae4b3', '#74c476', '#31a354', '#006d2c'] }
             ]
         },
-        { id: 'culture', title: '7. Культура и туризм', items: [] }
+        { id: 'culture', title: '7. Культура и туризм', items: [] },
     ],
 
     layersData: {

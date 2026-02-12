@@ -9,6 +9,7 @@ let currentLevel = 'republic';
 let activeMetric = null;
 let activeTradeMode = 'retail';
 let chartInstance = null;
+let manufacturersRegistry = {};
 
 // Хелпер для экранирования HTML (защита от XSS)
 function escapeHtml(text) {
@@ -25,8 +26,8 @@ function escapeHtml(text) {
 
 document.addEventListener('DOMContentLoaded', () => {
     createLevelButtons();
-    createAccordion();
     initChart();
+    initMaterialDropdown();
 });
 
 map.on('load', async () => {
@@ -51,13 +52,85 @@ map.on('load', async () => {
     switchLevel('republic');
     
     // Сброс подсветки при клике в пустоту
-    map.on('click', (e) => {
-        const features = map.queryRenderedFeatures(e.point);
-        const myLayerIds = Object.keys(MAP_CONFIG.layersData).flatMap(k => [k, k+'_circle']);
-        if (!features.find(f => myLayerIds.includes(f.layer.id))) {
-            map.getSource('highlight-source').setData({type: 'FeatureCollection', features: []});
+map.on('click', (e) => {
+    const features = map.queryRenderedFeatures(e.point);
+
+// 1. Ищем клик по населенному пункту
+    const townFeature = features.find(f => f.layer.id === 'towns');
+
+    // Проверяем, активна ли категория производителей в интерфейсе
+    const isProducersActive = document.getElementById('chk-toggle_manufacturers')?.checked;
+
+    if (townFeature && isProducersActive) {
+        const cityName = townFeature.properties.name; // Поле name из towns.geojson
+        const producers = manufacturersRegistry[cityName];
+
+        if (producers && producers.length > 0) {
+            // Формируем HTML список производителей
+            const producersHtml = producers.map(p => `
+                <div style="border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px;">
+                    <div style="font-weight: bold; color: #007aff;">${p['Наименование производителей']}</div>
+                    <div style="font-size: 12px; margin-top: 4px;">
+                        <b>Продукция:</b> ${p['Классификация']}<br>
+                        <b>Мощность:</b> ${p['Производственная мощность в год']}<br>
+                        <b>Контакты:</b> ${p['Контакты']}
+                    </div>
+                </div>
+            `).join('');
+
+            new maplibregl.Popup()
+                .setLngLat(e.lngLat)
+                .setHTML(`
+                    <div class="popup-header">
+                        <span class="popup-title-main">${cityName}</span>
+                        <span class="popup-subtitle">Найдено производителей: ${producers.length}</span>
+                    </div>
+                    <div class="popup-body" style="max-height: 250px; overflow-y: auto;">
+                        ${producersHtml}
+                    </div>
+                `)
+                .addTo(map);
+            return; // Прерываем, чтобы не срабатывали другие попапы
         }
+    }
+
+    // --- ИСПРАВЛЕНИЕ: СБРОС ВЫДЕЛЕНИЯ ---
+    if (features.length === 0) {
+        // Очищаем линию выделения
+        const source = map.getSource('highlight-source');
+        if (source) {
+            source.setData({ type: 'FeatureCollection', features: [] });
+        }
+        // Скрываем попап (если есть открытый)
+        const activePopups = document.getElementsByClassName('maplibregl-popup');
+        while (activePopups[0]) activePopups[0].remove();
+        
+        return; // Выходим из функции
+    }
+    
+    // Ищем фичу из слоя balance
+    const balanceFeature = features.find(f => f.layer.id === 'balance');
+
+    if (balanceFeature) {
+        // Берем готовый HTML из свойства combined_info
+        const htmlContent = balanceFeature.properties.combined_info || 'Нет данных';
+        const regionName = balanceFeature.properties.ADM1_EN || balanceFeature.properties.Name || 'Регион';
+
+        new maplibregl.Popup()
+            .setLngLat(e.lngLat)
+            .setHTML(`
+                <div class="popup-header"><span class="popup-title-main">${regionName}</span></div>
+                <div class="popup-body" style="max-height: 200px; overflow-y: auto;">
+                    ${htmlContent}
+                </div>
+            `)
+            .addTo(map);
+        
+        return; // Прерываем функцию, чтобы не сработали другие клики (например, по районам)
+    }
     });
+    await loadManufacturersData();
+    createAccordion();
 });
 
 // --- ВИЗУАЛИЗАЦИЯ СЛОЕВ ---
@@ -83,13 +156,23 @@ function addLayerVisuals(key, conf) {
         });
     } else if (conf.type === 'point-icon') {
         map.addLayer({
-            id: key + '_circle', type: 'circle', source: key, layout: { visibility: 'none' },
-            paint: { 'circle-radius': conf.size, 'circle-color': conf.color, 'circle-stroke-width': 1, 'circle-stroke-color': '#fff' }
+            id: 'towns',
+            type: 'circle',
+            source: 'towns',
+            layout: {
+                'visibility': 'none' // <--- ДОБАВИТЬ ЭТУ СТРОКУ
+            },
+            paint: {
+                'circle-radius': 6,
+                'circle-color': '#1a2025',
+                'circle-stroke-width': 2,
+                'circle-stroke-color': '#ffffff'
+            }
         });
-        map.addLayer({
-            id: key, type: 'symbol', source: key,
-            layout: { 'visibility': 'none', 'icon-image': conf.icon, 'icon-size': 0.5, 'icon-allow-overlap': true }
-        });
+        // map.addLayer({
+        //     id: key, type: 'symbol', source: key,
+        //     layout: { 'visibility': 'none', 'icon-image': conf.icon, 'icon-size': 0.5, 'icon-allow-overlap': true }
+        // });
     }
 }
 
@@ -424,12 +507,12 @@ function switchLevel(levelKey) {
 
 function createAccordion() {
     const list = document.getElementById('accordion-list');
+    if (!list) return;
     list.innerHTML = '';
     
     MAP_CONFIG.categories.forEach((cat, idx) => {
         const item = document.createElement('div');
         item.className = 'acc-item';
-        // Разворачиваем первую категорию (Демография) по умолчанию
         if (idx === 0) item.classList.add('active'); 
 
         const header = document.createElement('div');
@@ -445,11 +528,10 @@ function createAccordion() {
         const body = document.createElement('div');
         body.className = 'acc-body';
 
-        // Добавляем индекс mIdx для отслеживания первой метрики
         cat.items.forEach((metric, mIdx) => {
             const btnWrapper = document.createElement('div');
 
-            // 1. Спец. логика для переключателя Торговли
+            // 1. ТОРГОВЛЯ (Switch)
             if (metric.type === 'trade-switch') {
                 btnWrapper.className = 'trade-switch-container';
                 btnWrapper.innerHTML = `
@@ -461,8 +543,7 @@ function createAccordion() {
                         <label class="trade-radio-label ${activeTradeMode === 'wholesale' ? 'checked' : ''}" data-val="wholesale">
                             <input type="radio" name="tm_${metric.id}" value="wholesale" ${activeTradeMode === 'wholesale' ? 'checked' : ''}> Опт
                         </label>
-                    </div>
-                `;
+                    </div>`;
                 
                 btnWrapper.querySelector('.trade-title').onclick = () => activateMetric(metric, btnWrapper);
                 const labels = btnWrapper.querySelectorAll('.trade-radio-label');
@@ -475,7 +556,6 @@ function createAccordion() {
                         });
                         lbl.classList.add('checked');
                         lbl.querySelector('input').checked = true;
-
                         activeTradeMode = lbl.getAttribute('data-val');
                         
                         if (activeMetric === metric) reapplyCurrentMetric(); 
@@ -483,19 +563,143 @@ function createAccordion() {
                     };
                 });
             } 
-            // 2. Логика для простых переключателей слоев (чекбоксов)
-            else if (metric.type === 'toggle') {
-                btnWrapper.className = 'metric-option';
-                btnWrapper.innerHTML = `<input type="checkbox" style="margin-right:8px;"> ${metric.label}`;
-                btnWrapper.onclick = (e) => {
-                    if (e.target.type !== 'checkbox') {
-                        const chk = btnWrapper.querySelector('input');
-                        chk.checked = !chk.checked;
-                    }
-                    toggleLayer(metric);
+
+// ... внутри createAccordion, в блоке else if (metric.type === 'toggle-dropdown')
+
+else if (metric.type === 'toggle-dropdown') {
+    btnWrapper.className = 'metric-option';
+    btnWrapper.style.flexDirection = 'column';
+    btnWrapper.style.alignItems = 'flex-start';
+
+    // 1. Верхняя строка: Чекбокс + Текст
+    const headerRow = document.createElement('div');
+    headerRow.style.display = 'flex';
+    headerRow.style.alignItems = 'center';
+    headerRow.style.width = '100%';
+    headerRow.style.cursor = 'pointer';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = `chk-${metric.id}`;
+    checkbox.style.marginRight = '8px';
+
+    const label = document.createElement('span');
+    label.innerText = metric.label;
+
+    headerRow.appendChild(checkbox);
+    headerRow.appendChild(label);
+
+    // 2. Нижняя часть: Выпадающий список (скрыт по умолчанию)
+    const dropdownContainer = document.createElement('div');
+    dropdownContainer.style.marginTop = '8px';
+    dropdownContainer.style.width = '100%';
+    dropdownContainer.style.display = 'none'; // СКРЫТО
+    dropdownContainer.style.paddingLeft = '20px';
+
+    const select = document.createElement('select');
+    select.className = 'map-dropdown';
+    select.id = `dropdown-${metric.id}`;
+    select.style.width = '100%';
+    
+    // Пустой пункт
+    const defaultOpt = document.createElement('option');
+    defaultOpt.value = '';
+    defaultOpt.innerText = '— Все типы продукции —';
+    select.appendChild(defaultOpt);
+
+    dropdownContainer.appendChild(select);
+
+    // 3. Логика чекбокса (ВКЛ/ВЫКЛ слой и список)
+    headerRow.onclick = (e) => {
+        // Если клик не по самому чекбоксу, переключаем его
+        if (e.target !== checkbox && e.target !== select) {
+            checkbox.checked = !checkbox.checked;
+        }
+
+        if (checkbox.checked) {
+            // ВКЛЮЧАЕМ
+            dropdownContainer.style.display = 'block';
+            if (map.getLayer(metric.targetLayer)) {
+                map.setLayoutProperty(metric.targetLayer, 'visibility', 'visible');
+                // Применяем фильтр, если что-то уже выбрано
+                filterMapByMaterial(select.value, metric.targetLayer, metric.field);
+            }
+            
+            // Загружаем данные в список (если он пуст)
+            if (select.options.length <= 1) {
+                 initMaterialDropdown(select.id, metric.targetLayer, metric.field);
+            }
+        } else {
+            // ВЫКЛЮЧАЕМ
+            dropdownContainer.style.display = 'none';
+            if (map.getLayer(metric.targetLayer)) {
+                map.setLayoutProperty(metric.targetLayer, 'visibility', 'none');
+            }
+        }
+    };
+
+    // 4. Логика списка (Фильтрация)
+    select.onclick = (e) => e.stopPropagation(); // Чтобы не кликало по чекбоксу
+    select.onchange = (e) => {
+        filterMapByMaterial(e.target.value, metric.targetLayer, metric.field);
+    };
+
+    btnWrapper.appendChild(headerRow);
+    btnWrapper.appendChild(dropdownContainer);
+}
+
+// 2. ВЫПАДАЮЩИЙ СПИСОК (НОВЫЙ КОД, КОТОРОГО НЕ БЫЛО)
+            else if (metric.type === 'dropdown') {
+                btnWrapper.className = 'metric-option dropdown-wrapper';
+                btnWrapper.style.cursor = 'default';
+                btnWrapper.style.flexDirection = 'column';
+                btnWrapper.style.alignItems = 'flex-start';
+
+                const label = document.createElement('div');
+                label.className = 'dropdown-label';
+                label.innerText = metric.label;
+                label.style.marginBottom = '5px';
+                label.style.fontSize = '12px';
+                label.style.color = '#666';
+
+                const select = document.createElement('select');
+                select.className = 'map-dropdown'; // Убедитесь, что этот класс есть в CSS
+                select.style.width = '100%';
+                select.style.padding = '5px';
+                select.id = `dropdown-${metric.id}`; // Важный ID
+
+                const defaultOpt = document.createElement('option');
+                defaultOpt.value = '';
+                defaultOpt.innerText = '— Загрузка... —';
+                select.appendChild(defaultOpt);
+
+                // При изменении значения красим карту
+                select.onchange = (e) => {
+                    filterMapByMaterial(e.target.value, metric.targetLayer, metric.field);
                 };
-            } 
-            // 3. Обычные кнопки метрик (Население, ВРП и т.д.)
+
+                btnWrapper.appendChild(label);
+                btnWrapper.appendChild(select);
+                
+                // Запускаем наполнение списка (через небольшую задержку)
+                setTimeout(() => {
+                    initMaterialDropdown(select.id, metric.targetLayer, metric.field);
+                }, 500);
+            }
+
+            // 3. ОБЫЧНЫЙ TOGGLE (Чекбокс)
+            else if (metric.type === 'toggle') {
+                 // ... ваш код для toggle (можно скопировать из старого файла) ...
+                 btnWrapper.className = 'metric-option';
+                 btnWrapper.innerHTML = `<input type="checkbox" id="chk-${metric.id}" style="margin-right:8px;"> ${metric.label}`;
+                 btnWrapper.onclick = (e) => {
+                    const chk = btnWrapper.querySelector('input');
+                    if (e.target !== chk) chk.checked = !chk.checked;
+                    toggleLayer(metric);
+                 };
+            }
+            
+            // 4. ОБЫЧНАЯ КНОПКА
             else {
                 btnWrapper.className = 'metric-option';
                 btnWrapper.innerText = metric.label;
@@ -503,15 +707,6 @@ function createAccordion() {
             }
 
             body.appendChild(btnWrapper);
-
-            // --- АВТО-АКТИВАЦИЯ ПРИ ЗАГРУЗКЕ ---
-            // Если это самая первая метрика в самой первой категории (обычно Население)
-            if (idx === 0 && mIdx === 0) {
-                // Активируем только если это не простой toggle
-                if (metric.type !== 'toggle') {
-                    activateMetric(metric, btnWrapper);
-                }
-            }
         });
 
         item.appendChild(header);
@@ -533,12 +728,22 @@ function activateMetric(metric, uiEl) {
     reapplyCurrentMetric();
 }
 
+// Пример логики внутри функции переключения слоев
 function toggleLayer(metric) {
-    const layer = metric.layer;
-    if (!map.getLayer(layer)) return;
-    const vis = map.getLayoutProperty(layer, 'visibility') === 'visible' ? 'none' : 'visible';
-    map.setLayoutProperty(layer, 'visibility', vis);
-    if(map.getLayer(layer+'_circle')) map.setLayoutProperty(layer+'_circle', 'visibility', vis);
+    if (metric.id === 'toggle_manufacturers') {
+        const isChecked = document.getElementById(`chk-${metric.id}`).checked;
+        
+        if (isChecked) {
+            // Показываем только города, которые есть в ключах нашего реестра
+            const citiesWithProducers = Object.keys(manufacturersRegistry);
+            map.setFilter('towns', ['in', ['get', 'name'], ['literal', citiesWithProducers]]);
+            map.setLayoutProperty('towns', 'visibility', 'visible');
+        } else {
+            // Сбрасываем фильтр и скрываем слой (или показываем все города обратно)
+            map.setFilter('towns', null);
+            map.setLayoutProperty('towns', 'visibility', 'none');
+        }
+    }
 }
 
 function loadIcons() {
@@ -731,11 +936,70 @@ else if (layerId === 'balance') {
                 content += `<div style="font-size: 10px; color: #666; margin-top: 5px; text-align: center;">(см. динамику ниже)</div>`;
             }
         }
-        else if (layerId === 'towns') {
-            title = p['name'];
-            content = `<div class="popup-row"><span>Население:</span> <b>${p['popul']}</b></div>`;
-            if (currentLevel === 'settlement' && title && title.toUpperCase().includes('КОСТАНАЙ')) {
-                footer = `<div style="margin-top:10px; text-align:center;"><a href="https://d05s4D1LBKwrkaccszeKOFu4-Xe7LDL-7BEiH.github.io/kostY5_JYrviDpanay/"" class="popup-btn-link">Перейти к карте Костаная</a></div>`;
+else if (layerId === 'towns') {
+            const cityName = p['name'];
+            let factories = [];
+            
+            // Парсим данные о заводах из GeoJSON
+            try {
+                // Внимание: проверьте, как называется поле в вашем итоговом файле (factories_data или factories_json)
+                // Судя по присланному файлу towns.geojson, поле называется "factories_data"
+                factories = typeof p['factories_data'] === 'string' 
+                    ? JSON.parse(p['factories_data']) 
+                    : (p['factories_data'] || []);
+            } catch (e) { 
+                console.error("Ошибка чтения данных завода:", e); 
+            }
+
+            // 1. ПОЛУЧАЕМ ТЕКУЩИЙ ФИЛЬТР
+            // Ищем наш выпадающий список по ID (он формируется как dropdown + id из конфига)
+            const dropdown = document.getElementById('dropdown-manufacturers_filter');
+            const selectedCategory = dropdown ? dropdown.value : '';
+
+            // 2. ФИЛЬТРУЕМ СПИСОК
+            // Если в списке что-то выбрано, оставляем только подходящие заводы
+            if (selectedCategory && selectedCategory !== '') {
+                factories = factories.filter(f => f['Классификация'] === selectedCategory);
+            }
+
+            if (factories.length > 0) {
+                title = cityName;
+                // Красивый подзаголовок
+                const countText = factories.length + (factories.length === 1 ? ' производитель' : ' производителей');
+                sub = selectedCategory 
+                    ? `<span style="color:white; font-weight:600;">${selectedCategory}</span> <span style="color:#7f8c8d;">(${countText})</span>`
+                    : `Всего производителей: ${factories.length}`;
+
+                // Формируем карточки заводов
+                content = factories.map(f => `
+                    <div class="producer-card" style="margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 8px;">
+                        <div style="font-weight:bold; color:#007aff; font-size:14px; margin-bottom:4px;">
+                            ${f['Наименование производителей']}
+                        </div>
+                        <div style="font-size:12px; line-height:1.5; color:#333;">
+                            <div style="display:flex; justify-content:space-between;">
+                                <span style="color:#666;">Продукция:</span>
+                                <span style="text-align:right; font-weight:500;">${f['Виды материалов'] || f['Классификация']}</span>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; margin-top:2px;">
+                                <span style="color:#666;">Мощность:</span>
+                                <b>${f['Производственная мощность в год'] || '-'}</b>
+                            </div>
+                            <div style="margin-top:6px; padding-top:4px; border-top:1px dashed #eee; color:#555;">
+                                📞 ${f['Контакты'] || 'нет данных'}
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                // Если фильтр выбран, но заводов нет (такое бывает редко, если точки фильтруются, но на всякий случай)
+                title = cityName;
+                if (selectedCategory) {
+                    content = `<div class="popup-row" style="color:#666;">В этом городе нет производителей категории <b>"${selectedCategory}"</b></div>`;
+                } else {
+                    // Если фильтра нет и заводов нет — показываем население
+                    content = `<div class="popup-row">Население: ${p['popul'] ? p['popul'].toLocaleString() : 'нет данных'}</div>`;
+                }
             }
         }
         else if (layerId === 'storages') {
@@ -779,5 +1043,138 @@ function toggleChartCollapse() {
     } else {
         btn.innerText = 'Свернуть';
         setTimeout(() => chartInstance.resize(), 300);
+    }
+}
+
+// map.js
+
+// 1. Функция фильтрации (раскраски) карты
+// map.js
+
+function filterMapByMaterial(selectedValue, layerId, fieldName) {
+    if (!map.getLayer(layerId)) return;
+
+    // Определяем тип слоя, чтобы знать, какое свойство красить
+    const layerType = map.getLayer(layerId).type;
+    const paintProp = layerType === 'circle' ? 'circle-color' : 'fill-color';
+    
+    // Цвет по умолчанию (если фильтр сброшен)
+    // Для точек синий, для полигонов серый
+    const defaultColor = layerType === 'circle' ? '#007aff' : '#ccc'; 
+
+    if (!selectedValue) {
+        // Сбрасываем фильтр: возвращаем всем исходный цвет
+        map.setPaintProperty(layerId, paintProp, defaultColor);
+        
+        // Если это точки, можно вернуть им исходный радиус
+        if (layerType === 'circle') {
+             map.setPaintProperty(layerId, 'circle-radius', 6);
+             map.setPaintProperty(layerId, 'circle-stroke-color', '#fff');
+        }
+        return;
+    }
+
+    // ЛОГИКА ОКРАШИВАНИЯ
+    map.setPaintProperty(layerId, paintProp, [
+        'case',
+        // Проверяем: содержится ли выбранное значение в массиве fieldName
+        ['in', selectedValue, ['get', fieldName]], 
+        '#4caf50', // ЗЕЛЕНЫЙ: если город производит этот товар
+        '#e0e0e0'  // СЕРЫЙ: если не производит
+    ]);
+
+    // ЛОГИКА РАЗМЕРА (Только для точек)
+    // Делаем подходящие города чуть больше, а неподходящие — меньше
+    if (layerType === 'circle') {
+        map.setPaintProperty(layerId, 'circle-radius', [
+            'case',
+            ['in', selectedValue, ['get', fieldName]],
+            9,  // Большой радиус для подходящих
+            4   // Маленький для остальных
+        ]);
+        
+        // Убираем обводку у неактивных, добавляем активным
+        map.setPaintProperty(layerId, 'circle-stroke-color', [
+            'case',
+            ['in', selectedValue, ['get', fieldName]],
+            '#ffffff', // Белая обводка для активных
+            'transparent' // Без обводки для неактивных
+        ]);
+    }
+}
+
+// 2. Функция для загрузки списка товаров в выпадающий список
+async function initMaterialDropdown(selectId, layerId, fieldName) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+
+    try {
+        // Убедитесь, что путь к файлу в MAP_CONFIG верный
+        const layerConfig = MAP_CONFIG.layersData[layerId];
+        if (!layerConfig) return;
+
+        const response = await fetch(layerConfig.file);
+        const data = await response.json();
+
+        const uniqueValues = new Set();
+        
+        data.features.forEach(feature => {
+            let val = feature.properties[fieldName];
+            
+            if (val) {
+                // Если это строка, которая выглядит как массив JSON: '["А", "Б"]'
+                if (typeof val === 'string' && val.startsWith('[')) {
+                    try {
+                        const parsed = JSON.parse(val);
+                        if (Array.isArray(parsed)) parsed.forEach(v => uniqueValues.add(v));
+                    } catch (e) { console.error("Ошибка парсинга поля:", fieldName); }
+                } 
+                // Если это уже массив (нативный JSON)
+                else if (Array.isArray(val)) {
+                    val.forEach(v => uniqueValues.add(v));
+                }
+                // Если это просто строка
+                else {
+                    uniqueValues.add(val);
+                }
+            }
+        });
+
+        // Очищаем и заполняем
+        select.innerHTML = '<option value="">— Не выбрано —</option>';
+        Array.from(uniqueValues).sort().forEach(val => {
+            if (val && val !== "[]") {
+                const option = document.createElement('option');
+                option.value = val;
+                option.text = val;
+                select.appendChild(option);
+            }
+        });
+
+    } catch (error) {
+        console.error("Ошибка загрузки данных для списка:", error);
+    }
+}
+
+async function loadManufacturersData() {
+    try {
+        const response = await fetch('data/reestr.json');
+        if (!response.ok) throw new Error(`Файл не найден (Status: ${response.status})`);
+        
+        const data = await response.json();
+        
+        manufacturersRegistry = {}; 
+
+        data.forEach(item => {
+            const city = item["name"];  // Используем "name" вместо "Город/поселок/село производства"
+            if (city) {
+                if (!manufacturersRegistry[city]) manufacturersRegistry[city] = [];
+                manufacturersRegistry[city].push(item);
+            }
+        });
+        console.log("Реестр производителей успешно загружен", manufacturersRegistry);  // Добавьте для отладки
+    } catch (e) {
+        console.error("Ошибка загрузки реестра:", e.message);
+        manufacturersRegistry = null; 
     }
 }
